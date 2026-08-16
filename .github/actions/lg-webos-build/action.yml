@@ -1,0 +1,110 @@
+name: LG webOS Build
+description: Build webOS IPK for TV and upload artifact / GitHub Release (single-app)
+
+inputs:
+  api_entrypoint:
+    required: false
+    default: ""
+  domain:
+    required: false
+    default: ""
+  socket:
+    required: false
+    default: ""
+  app_id:
+    required: false
+    default: "com.forplayers.app"
+  vendor:
+    required: false
+    default: "ForPlayers"
+  title:
+    required: false
+    default: "ForPlayers"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version: "20"
+
+    - name: Update Submodules
+      shell: bash
+      run: |
+        if [ -f .gitmodules ]; then
+          git submodule sync --recursive
+          git submodule update --recursive --init --checkout
+        fi
+
+    - name: Generate env.local.js
+      shell: bash
+      run: |
+        set -e
+        ZOOM=70
+        if [ -f ./config/env.local.sample ]; then
+          ZOOM=$(node -p "try{require('./config/env.local.sample').env.ZOOM??70}catch(e){70}" 2>/dev/null || echo 70)
+        fi
+        mkdir -p ./config
+        cat > ./config/env.local.js << ENVEOF
+        const env = {
+          API_ENTRYPOINT: '${{ inputs.api_entrypoint }}',
+          DOMAIN: '${{ inputs.domain }}',
+          SOCKET: '${{ inputs.socket }}',
+          ZOOM: ${ZOOM}
+        };
+        module.exports = { env };
+        ENVEOF
+
+    - name: Install & export web
+      shell: bash
+      run: |
+        npm install --legacy-peer-deps
+        npx expo install --fix || true
+        EXPO_OS=web npx expo export --platform web
+
+    - name: Package IPK
+      shell: bash
+      run: |
+        set -e
+        VERSION=$(node -p "require('./app.json').expo.version || '1.0.0'")
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        # favicon opcional
+        find . -path '*/assets/*favicon*' -o -path '*/favicon.png' 2>/dev/null | head -n1 | while read -r f; do
+          cp "$f" ./dist/favicon.png 2>/dev/null || true
+        done
+        cat > ./dist/appinfo.json <<EOF
+        {
+          "id": "${{ inputs.app_id }}",
+          "version": "${VERSION}",
+          "vendor": "${{ inputs.vendor }}",
+          "type": "web",
+          "main": "index.html",
+          "title": "${{ inputs.title }}",
+          "icon": "favicon.png",
+          "largeIcon": "favicon.png"
+        }
+        EOF
+        npm install -g @webosose/ares-cli
+        mkdir -p ./webos-build
+        ares-package --no-minify ./dist -o ./webos-build
+
+    - name: Upload IPK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: lg-webos-forplayers-ipk
+        path: webos-build/*.ipk
+
+    - name: Attach IPK to GitHub Release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -e
+        IPK=$(find ./webos-build -name '*.ipk' | head -n1)
+        [ -z "$IPK" ] && exit 0
+        TAG="v${VERSION}"
+        if gh release view "$TAG" >/dev/null 2>&1; then
+          gh release upload "$TAG" "$IPK" --clobber
+        else
+          gh release create "$TAG" "$IPK" --title "ForPlayers ${VERSION}" --notes "webOS TV IPK"
+        fi

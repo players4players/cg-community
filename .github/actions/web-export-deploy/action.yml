@@ -1,0 +1,69 @@
+name: Web Export Deploy
+description: Configure env, expo export web, deploy via FTP (single-app)
+
+inputs:
+  api_entrypoint:
+    required: true
+  socket:
+    required: true
+  domain:
+    required: false
+    default: ""
+  remote_dir:
+    required: false
+    default: "~/public_html"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version: "20"
+
+    - name: Creating Config
+      shell: bash
+      run: |
+        set -e
+        ZOOM=100
+        if [ -f ./config/env.local.sample ]; then
+          ZOOM=$(node -p "try{require('./config/env.local.sample').env.ZOOM??100}catch(e){100}" 2>/dev/null || echo 100)
+        fi
+        DOMAIN_LINE=""
+        if [ -n "${{ inputs.domain }}" ]; then
+          DOMAIN_LINE="DOMAIN: '${{ inputs.domain }}',"
+        fi
+        mkdir -p ./config
+        cat > ./config/env.local.js << ENVEOF
+        const env = {
+          API_ENTRYPOINT: '${{ inputs.api_entrypoint }}',
+          SOCKET: '${{ inputs.socket }}',
+          ${DOMAIN_LINE}
+          ZOOM: ${ZOOM}
+        };
+        module.exports = { env };
+        ENVEOF
+
+    - name: Update Submodules
+      shell: bash
+      run: |
+        if [ -f .gitmodules ]; then
+          git submodule sync --recursive
+          git submodule update --recursive --init --checkout
+        fi
+
+    - name: Install & build
+      shell: bash
+      run: |
+        npm install --legacy-peer-deps
+        npx expo install --fix || true
+        npx expo export --platform web
+
+    - name: Deploy FTP
+      uses: locaweb/ftp-deploy@1.0.0
+      with:
+        host: ${{ env.FTP_HOST }}
+        user: ${{ env.FTP_USER }}
+        password: ${{ env.FTP_PASS }}
+        localDir: "./dist"
+        remoteDir: ${{ inputs.remote_dir }}
+        forceSsl: false

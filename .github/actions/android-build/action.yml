@@ -1,0 +1,230 @@
+name: Android Build
+description: Expo prebuild + Gradle (AAB/APK) + optional GitHub Release (single-app ForPlayers)
+
+inputs:
+  display_name:
+    required: true
+  package_name:
+    required: false
+    default: "com.forplayers.app"
+  expo_name:
+    required: false
+    default: "ForPlayers"
+  expo_slug:
+    required: false
+    default: "forplayers-app"
+  api_entrypoint:
+    required: false
+    default: ""
+  domain:
+    required: false
+    default: ""
+  socket:
+    required: false
+    default: ""
+  build_aab:
+    required: false
+    default: "true"
+  build_apk:
+    required: false
+    default: "true"
+  publish_play:
+    required: false
+    default: "false"
+  publish_github:
+    required: false
+    default: "true"
+  play_track:
+    required: false
+    default: "internal"
+  play_status:
+    required: false
+    default: "draft"
+  play_changes_not_sent_for_review:
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve package / slug / name
+      shell: bash
+      run: |
+        set -e
+        PACKAGE_NAME="${{ inputs.package_name }}"
+        [ -z "$PACKAGE_NAME" ] && PACKAGE_NAME="com.forplayers.app"
+        EXPO_NAME="${{ inputs.expo_name }}"
+        [ -z "$EXPO_NAME" ] && EXPO_NAME="ForPlayers"
+        EXPO_SLUG="${{ inputs.expo_slug }}"
+        [ -z "$EXPO_SLUG" ] && EXPO_SLUG="forplayers-app"
+        {
+          echo "PACKAGE_NAME=$PACKAGE_NAME"
+          echo "EXPO_NAME=$EXPO_NAME"
+          echo "EXPO_SLUG=$EXPO_SLUG"
+        } >> "$GITHUB_ENV"
+
+    - name: Update Submodules
+      shell: bash
+      run: |
+        if [ -f .gitmodules ]; then
+          git submodule sync --recursive
+          git submodule update --recursive --init --checkout
+        fi
+
+    - uses: gradle/actions/setup-gradle@v3
+
+    - uses: amyu/setup-android@v4
+      with:
+        sdk-version: "36"
+        build-tools-version: "36.0.0"
+        ndk-version: "27.1.12297006"
+
+    - uses: actions/setup-node@v5
+      with:
+        node-version: "20"
+
+    - name: Generate env.local.js
+      shell: bash
+      run: |
+        set -e
+        ZOOM=100
+        if [ -f ./config/env.local.sample ]; then
+          ZOOM=$(node -p "try{require('./config/env.local.sample').env.ZOOM??100}catch(e){100}" 2>/dev/null || echo 100)
+        fi
+        mkdir -p ./config
+        cat > ./config/env.local.js << ENVEOF
+        const env = {
+          API_ENTRYPOINT: '${{ inputs.api_entrypoint }}',
+          DOMAIN: '${{ inputs.domain }}',
+          SOCKET: '${{ inputs.socket }}',
+          ZOOM: ${ZOOM}
+        };
+        module.exports = { env };
+        ENVEOF
+
+    - name: Backup and patch app.json
+      shell: bash
+      run: |
+        set -e
+        cp app.json app.json.backup
+        node -e "
+          const fs=require('fs');
+          const app=require('./app.json');
+          app.expo=app.expo||{};
+          app.expo.name=process.env.EXPO_NAME;
+          app.expo.slug=process.env.EXPO_SLUG;
+          app.expo.android=app.expo.android||{};
+          app.expo.android.package=process.env.PACKAGE_NAME;
+          fs.writeFileSync('./app.json', JSON.stringify(app,null,2));
+        "
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        npm install --legacy-peer-deps
+        npx expo install --fix || true
+
+    - name: Prebuild
+      shell: bash
+      run: npx expo prebuild --clean
+
+    - name: Signing files
+      shell: bash
+      run: |
+        set -e
+        if [ -z "${CERT:-}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ]; then
+          echo "CERT / ANDROID_KEYSTORE_PASSWORD not set — skip signed release or provide secrets"
+          exit 0
+        fi
+        mkdir -p ./config/android
+        echo "$CERT" | base64 -d > ./config/android/release.keystore
+        echo "MYAPP_UPLOAD_STORE_FILE=./config/android/release.keystore" > ./config/android/env.properties
+        echo "MYAPP_UPLOAD_KEY_ALIAS=forplayers" >> ./config/android/env.properties
+        echo "MYAPP_UPLOAD_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> ./config/android/env.properties
+        echo "MYAPP_UPLOAD_KEY_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> ./config/android/env.properties
+
+    - name: Gradle build
+      shell: bash
+      run: |
+        set -e
+        if [ ! -d android ]; then
+          echo "android/ missing after prebuild"
+          exit 1
+        fi
+        cd android
+        TASKS=""
+        [ "${{ inputs.build_aab }}" = "true" ] && TASKS="$TASKS bundleRelease"
+        [ "${{ inputs.build_apk }}" = "true" ] && TASKS="$TASKS assembleRelease"
+        [ -z "$TASKS" ] && { echo "No build targets"; exit 1; }
+        if [ -f ../signing.gradle ]; then
+          # shellcheck disable=SC2086
+          ./gradlew $TASKS --init-script ../signing.gradle \
+            -Dorg.gradle.jvmargs="-Xmx6144m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8"
+        else
+          # shellcheck disable=SC2086
+          ./gradlew $TASKS \
+            -Dorg.gradle.jvmargs="-Xmx6144m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8"
+        fi
+
+    - name: Extract version
+      shell: bash
+      run: |
+        VERSION=$(node -p "require('./app.json').expo.version || '1.0.0'")
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-forplayers-${{ env.VERSION }}
+        path: |
+          android/app/build/outputs/bundle/release/*.aab
+          android/app/build/outputs/apk/release/*.apk
+        if-no-files-found: warn
+
+    - name: GitHub Release (AAB + APK)
+      if: inputs.publish_github == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -e
+        RELEASE_TAG="v${VERSION}"
+        RELEASE_DIR="${RUNNER_TEMP}/release-assets"
+        mkdir -p "$RELEASE_DIR"
+        ASSETS=""
+        AAB=$(find ./android/app/build/outputs/bundle/release -name '*.aab' 2>/dev/null | head -n1 || true)
+        APK=$(find ./android/app/build/outputs/apk/release -name '*.apk' 2>/dev/null | head -n1 || true)
+        [ -n "$AAB" ] && cp "$AAB" "${RELEASE_DIR}/${EXPO_SLUG}-release.aab" && ASSETS="$ASSETS ${RELEASE_DIR}/${EXPO_SLUG}-release.aab"
+        [ -n "$APK" ] && cp "$APK" "${RELEASE_DIR}/${EXPO_SLUG}-release.apk" && ASSETS="$ASSETS ${RELEASE_DIR}/${EXPO_SLUG}-release.apk"
+        [ -z "$ASSETS" ] && exit 0
+        if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          # shellcheck disable=SC2086
+          gh release upload "$RELEASE_TAG" $ASSETS --clobber
+        else
+          # shellcheck disable=SC2086
+          gh release create "$RELEASE_TAG" $ASSETS --title "ForPlayers ${VERSION}" --notes "Build v${VERSION}"
+        fi
+
+    - name: Play Store (AAB)
+      if: inputs.publish_play == 'true'
+      shell: bash
+      run: |
+        set -e
+        echo "$ANDROID_SERVICE_ACCOUNT_JSON" | base64 -d > /tmp/service_account.json
+
+    - name: Upload to Play
+      if: inputs.publish_play == 'true'
+      uses: r0adkll/upload-google-play@v1
+      with:
+        serviceAccountJson: /tmp/service_account.json
+        packageName: ${{ env.PACKAGE_NAME }}
+        releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+        track: ${{ inputs.play_track }}
+        status: ${{ inputs.play_status }}
+        changesNotSentForReview: ${{ inputs.play_changes_not_sent_for_review }}
+
+    - name: Restore app.json
+      if: always()
+      shell: bash
+      run: |
+        [ -f app.json.backup ] && cp app.json.backup app.json || true

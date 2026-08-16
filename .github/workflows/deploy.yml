@@ -1,0 +1,136 @@
+# players4players/cg-community — deploy (web FTP + Android + LG webOS)
+# Single-app (sem app_type / matrix multi-produto).
+# Secrets: FTP_HOST, FTP_USER, FTP_PASSWORD
+# Opcional Android: CERT, ANDROID_KEYSTORE_PASSWORD
+name: Deploy
+
+on:
+  push:
+    branches: [dev, staging, master]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Ambiente"
+        required: true
+        type: choice
+        options: [dev, staging, master]
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  configure:
+    name: "1 · Configure"
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.set.outputs.env }}
+      api: ${{ steps.set.outputs.api }}
+      socket: ${{ steps.set.outputs.socket }}
+      domain: ${{ steps.set.outputs.domain }}
+      publish_native: ${{ steps.set.outputs.publish_native }}
+    steps:
+      - id: set
+        run: |
+          set -e
+          ENV="${{ github.event.inputs.environment || github.ref_name }}"
+          case "$ENV" in
+            dev)
+              API="${{ secrets.API_DEV || 'https://api-dev.forplayers.app' }}"
+              SOCK="${{ secrets.SOCKET_DEV || 'wss://api-dev.forplayers.app' }}"
+              DOMAIN="${{ secrets.DOMAIN_DEV || 'https://dev.forplayers.app' }}"
+              NATIVE=false
+              ;;
+            staging)
+              API="${{ secrets.API_STAGING || 'https://api-staging.forplayers.app' }}"
+              SOCK="${{ secrets.SOCKET_STAGING || 'wss://api-staging.forplayers.app' }}"
+              DOMAIN="${{ secrets.DOMAIN_STAGING || 'https://staging.forplayers.app' }}"
+              NATIVE=false
+              ;;
+            master)
+              API="${{ secrets.API_PROD || 'https://api.forplayers.app' }}"
+              SOCK="${{ secrets.SOCKET_PROD || 'wss://api.forplayers.app' }}"
+              DOMAIN="${{ secrets.DOMAIN_PROD || 'https://app.forplayers.app' }}"
+              NATIVE=true
+              ;;
+            *)
+              echo "Ambiente inválido: $ENV (use dev|staging|master)"
+              exit 1
+              ;;
+          esac
+          {
+            echo "env=$ENV"
+            echo "api=$API"
+            echo "socket=$SOCK"
+            echo "domain=$DOMAIN"
+            echo "publish_native=$NATIVE"
+          } >> "$GITHUB_OUTPUT"
+          echo "env=$ENV native=$NATIVE api=$API"
+
+  web:
+    name: "2 · Web (${{ needs.configure.outputs.env }})"
+    needs: configure
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: FTP credentials
+        run: |
+          set -e
+          echo "FTP_HOST=${{ secrets.FTP_HOST }}" >> "$GITHUB_ENV"
+          echo "FTP_USER=${{ secrets.FTP_USER }}" >> "$GITHUB_ENV"
+          echo "FTP_PASS=${{ secrets.FTP_PASSWORD }}" >> "$GITHUB_ENV"
+          if [ -z "${{ secrets.FTP_HOST }}" ] || [ -z "${{ secrets.FTP_USER }}" ] || [ -z "${{ secrets.FTP_PASSWORD }}" ]; then
+            echo "Missing FTP_HOST / FTP_USER / FTP_PASSWORD secrets"
+            exit 1
+          fi
+
+      - uses: ./.github/actions/web-export-deploy
+        with:
+          api_entrypoint: ${{ needs.configure.outputs.api }}
+          socket: ${{ needs.configure.outputs.socket }}
+          domain: ${{ needs.configure.outputs.domain }}
+          remote_dir: "~/public_html"
+
+  android:
+    name: "3 · Android"
+    needs: configure
+    if: needs.configure.outputs.env == 'master' && needs.configure.outputs.publish_native == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/android-build
+        with:
+          display_name: ForPlayers
+          package_name: com.forplayers.app
+          expo_name: ForPlayers
+          expo_slug: forplayers-app
+          api_entrypoint: ${{ needs.configure.outputs.api }}
+          domain: ${{ needs.configure.outputs.domain }}
+          socket: ${{ needs.configure.outputs.socket }}
+          build_aab: "true"
+          build_apk: "true"
+          publish_play: "false"
+          publish_github: "true"
+        env:
+          CERT: ${{ secrets.CERT }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+
+  lg-webos:
+    name: "4 · LG webOS (TV)"
+    needs: configure
+    if: needs.configure.outputs.env == 'master' && needs.configure.outputs.publish_native == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/lg-webos-build
+        with:
+          api_entrypoint: ${{ needs.configure.outputs.api }}
+          domain: ${{ needs.configure.outputs.domain }}
+          socket: ${{ needs.configure.outputs.socket }}
