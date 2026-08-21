@@ -42,19 +42,19 @@ jobs:
             dev)
               API="${{ secrets.API_DEV || 'https://d.forplayers.com.br' }}"
               SOCK="${{ secrets.SOCKET_DEV || 'wss://d.forplayers.com.br' }}"
-              DOMAIN="${{ secrets.DOMAIN_DEV || 'https://dev.forplayers.com.br' }}"
+              DOMAIN="${{ secrets.DOMAIN_DEV || 'https://cg.forplayers.com.br' }}"
               NATIVE=false
               ;;
             staging)
-              API="${{ secrets.API_STAGING || 'https://s.forplayers.com.br' }}"
-              SOCK="${{ secrets.SOCKET_STAGING || 'wss://s.forplayers.com.br' }}"
-              DOMAIN="${{ secrets.DOMAIN_STAGING || 'https://staging.forplayers.com.br' }}"
+              API="${{ secrets.API_STAGING || 'https://s.controleonline.com' }}"
+              SOCK="${{ secrets.SOCKET_STAGING || 'wss://s.controleonline.com' }}"
+              DOMAIN="${{ secrets.DOMAIN_STAGING || 'https://cg.forplayers.com.br' }}"
               NATIVE=false
               ;;
             master)
               API="${{ secrets.API_PROD || 'https://api.forplayers.com.br' }}"
               SOCK="${{ secrets.SOCKET_PROD || 'wss://api.forplayers.com.br' }}"
-              DOMAIN="${{ secrets.DOMAIN_PROD || 'https://app.forplayers.com.br' }}"
+              DOMAIN="${{ secrets.DOMAIN_PROD || 'https://cg.forplayers.com.br' }}"
               NATIVE=true
               ;;
             *)
