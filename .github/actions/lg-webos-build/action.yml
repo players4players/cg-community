@@ -13,7 +13,7 @@ inputs:
     default: ""
   app_id:
     required: false
-    default: "com.forplayers.app"
+    default: "com.forplayers.com.br"
   vendor:
     required: false
     default: "ForPlayers"

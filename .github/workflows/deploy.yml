@@ -40,21 +40,21 @@ jobs:
           ENV="${{ github.event.inputs.environment || github.ref_name }}"
           case "$ENV" in
             dev)
-              API="${{ secrets.API_DEV || 'https://api-dev.forplayers.app' }}"
-              SOCK="${{ secrets.SOCKET_DEV || 'wss://api-dev.forplayers.app' }}"
-              DOMAIN="${{ secrets.DOMAIN_DEV || 'https://dev.forplayers.app' }}"
+              API="${{ secrets.API_DEV || 'https://d.forplayers.com.br' }}"
+              SOCK="${{ secrets.SOCKET_DEV || 'wss://d.forplayers.com.br' }}"
+              DOMAIN="${{ secrets.DOMAIN_DEV || 'https://dev.forplayers.com.br' }}"
               NATIVE=false
               ;;
             staging)
-              API="${{ secrets.API_STAGING || 'https://api-staging.forplayers.app' }}"
-              SOCK="${{ secrets.SOCKET_STAGING || 'wss://api-staging.forplayers.app' }}"
-              DOMAIN="${{ secrets.DOMAIN_STAGING || 'https://staging.forplayers.app' }}"
+              API="${{ secrets.API_STAGING || 'https://s.forplayers.com.br' }}"
+              SOCK="${{ secrets.SOCKET_STAGING || 'wss://s.forplayers.com.br' }}"
+              DOMAIN="${{ secrets.DOMAIN_STAGING || 'https://staging.forplayers.com.br' }}"
               NATIVE=false
               ;;
             master)
-              API="${{ secrets.API_PROD || 'https://api.forplayers.app' }}"
-              SOCK="${{ secrets.SOCKET_PROD || 'wss://api.forplayers.app' }}"
-              DOMAIN="${{ secrets.DOMAIN_PROD || 'https://app.forplayers.app' }}"
+              API="${{ secrets.API_PROD || 'https://api.forplayers.com.br' }}"
+              SOCK="${{ secrets.SOCKET_PROD || 'wss://api.forplayers.com.br' }}"
+              DOMAIN="${{ secrets.DOMAIN_PROD || 'https://app.forplayers.com.br' }}"
               NATIVE=true
               ;;
             *)
@@ -108,7 +108,7 @@ jobs:
       - uses: ./.github/actions/android-build
         with:
           display_name: ForPlayers
-          package_name: com.forplayers.app
+          package_name: com.forplayers.com.br
           expo_name: ForPlayers
           expo_slug: forplayers-app
           api_entrypoint: ${{ needs.configure.outputs.api }}

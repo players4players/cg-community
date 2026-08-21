@@ -6,7 +6,7 @@ inputs:
     required: true
   package_name:
     required: false
-    default: "com.forplayers.app"
+    default: "com.forplayers.com.br"
   expo_name:
     required: false
     default: "ForPlayers"
@@ -52,7 +52,7 @@ runs:
       run: |
         set -e
         PACKAGE_NAME="${{ inputs.package_name }}"
-        [ -z "$PACKAGE_NAME" ] && PACKAGE_NAME="com.forplayers.app"
+        [ -z "$PACKAGE_NAME" ] && PACKAGE_NAME="com.forplayers.com.br"
         EXPO_NAME="${{ inputs.expo_name }}"
         [ -z "$EXPO_NAME" ] && EXPO_NAME="ForPlayers"
         EXPO_SLUG="${{ inputs.expo_slug }}"
